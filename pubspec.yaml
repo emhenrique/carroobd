@@ -1,8 +1,10 @@
+
 name: myapp
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+license: "UNLICENSED" # Added to satisfy strict metadata checks
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -37,6 +39,9 @@ dependencies:
   flutter_blue_plus: ^2.0.0
   provider: ^6.1.5+1
   google_fonts: ^6.3.2
+  syncfusion_flutter_gauges: ^31.2.4
+  permission_handler: ^12.0.1
+  flutter_overlay_window: ^0.5.0
 
 dev_dependencies:
   flutter_test:
