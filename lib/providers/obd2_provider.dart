@@ -65,7 +65,7 @@ class OBD2Provider with ChangeNotifier {
         notifyListeners();
       });
 
-      await device.connect(autoConnect: false, license: null);
+      await device.connect(autoConnect: false);
       if (_connectionState == BluetoothConnectionState.connected) {
         await _discoverServices(device);
       }
@@ -203,7 +203,7 @@ class OBD2Provider with ChangeNotifier {
         _coolantTemp = _obd2Service.parseSensorResponse(await _sendCommand('${OBDModes.showCurrentData} ${PIDs.engineCoolantTemp}'));
         notifyListeners();
 
-        if (await FlutterOverlayWindow.isActive() ?? false) {
+        if (await FlutterOverlayWindow.isActive()) {
           FlutterOverlayWindow.shareData(_coolantTemp?.toStringAsFixed(1) ?? "--");
         }
       }

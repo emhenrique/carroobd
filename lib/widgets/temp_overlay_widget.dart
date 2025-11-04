@@ -32,7 +32,7 @@ class _TempOverlayWidgetState extends State<TempOverlayWidget> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.7),
+            color: Colors.black.withAlpha((255 * 0.7).round()),
             borderRadius: BorderRadius.circular(30),
             border: Border.all(color: Colors.white, width: 1.5),
           ),

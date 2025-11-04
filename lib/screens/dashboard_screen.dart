@@ -5,8 +5,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:myapp/providers/obd2_provider.dart';
 import 'package:myapp/screens/dtc_screen.dart';
+import 'package:percent_indicator/percent_indicator.dart';
 import 'package:provider/provider.dart';
-import 'package:syncfusion_flutter_gauges/gauges.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -106,9 +106,8 @@ class _SensorPanelState extends State<SensorPanel> {
   @override
   void initState() {
     super.initState();
-    // Garante que o estado do switch reflita o estado real da sobreposição ao iniciar a tela
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final isActive = await FlutterOverlayWindow.isActive() ?? false;
+      final isActive = await FlutterOverlayWindow.isActive();
       if (mounted) setState(() => _isOverlayActive = isActive);
     });
   }
@@ -116,7 +115,7 @@ class _SensorPanelState extends State<SensorPanel> {
   Future<void> _toggleOverlay(bool value) async {
     if (value) {
       final hasPermission = await FlutterOverlayWindow.requestPermission();
-      if (!hasPermission) return;
+      if (hasPermission != true) return;
       
       await FlutterOverlayWindow.showOverlay(
           height: 60,
@@ -124,38 +123,129 @@ class _SensorPanelState extends State<SensorPanel> {
           alignment: OverlayAlignment.topCenter,
           overlayTitle: "Temperatura do Motor",
           enableDrag: true);
-       if (mounted) setState(() => _isOverlayActive = true);
+      if (mounted) setState(() => _isOverlayActive = true);
 
     } else {
       await FlutterOverlayWindow.closeOverlay();
-       if (mounted) setState(() => _isOverlayActive = false);
+      if (mounted) setState(() => _isOverlayActive = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<OBD2Provider>();
+    final colorScheme = Theme.of(context).colorScheme;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         children: [
           _buildStatusIndicator(context, provider.connectionState),
+          const SizedBox(height: 20),
+          _buildRpmIndicator(provider.rpm, colorScheme),
+          const SizedBox(height: 30),
+          _buildLinearIndicator(
+            title: 'Velocidade',
+            value: provider.speed,
+            maxValue: 220,
+            unit: 'km/h',
+            icon: Icons.speed,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(height: 20),
+          _buildLinearIndicator(
+            title: 'Temperatura do Motor',
+            value: provider.coolantTemp,
+            maxValue: 120,
+            unit: '°C',
+            icon: Icons.thermostat,
+            color: Colors.red.shade400,
+            linearGradient: const LinearGradient(colors: [Colors.blue, Colors.green, Colors.red]),
+          ),
+          const SizedBox(height: 20),
           if (Platform.isAndroid) _buildOverlaySwitch(),
-          const SizedBox(height: 20),
-          _buildRPMGauge(provider.rpm),
-          const SizedBox(height: 20),
-          _buildSpeedGauge(provider.speed),
-          const SizedBox(height: 20),
-          _buildCoolantGauge(provider.coolantTemp),
         ],
       ),
     );
   }
 
+  Widget _buildRpmIndicator(double? rpm, ColorScheme colorScheme) {
+    final percent = (rpm ?? 0) / 8000;
+    final progressColor = rpm == null ? Colors.grey.shade300 :
+                          percent > 0.75 ? Colors.red.shade600 :
+                          percent > 0.5 ? Colors.orange.shade600 : colorScheme.primary;
+
+    return CircularPercentIndicator(
+      radius: 120.0,
+      lineWidth: 15.0,
+      percent: percent.clamp(0.0, 1.0),
+      animation: true,
+      animationDuration: 300,
+      center: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            rpm?.toStringAsFixed(0) ?? '--',
+            style: Theme.of(context).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          Text("RPM", style: Theme.of(context).textTheme.bodyLarge),
+        ],
+      ),
+      progressColor: progressColor,
+      backgroundColor: colorScheme.surfaceContainerHighest,
+      circularStrokeCap: CircularStrokeCap.round,
+    );
+  }
+
+  Widget _buildLinearIndicator({
+    required String title,
+    required double? value,
+    required double maxValue,
+    required String unit,
+    required IconData icon,
+    required Color color,
+    LinearGradient? linearGradient,
+  }) {
+    final percent = (value ?? 0) / maxValue;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: 8),
+                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                const Spacer(),
+                Text(
+                  value != null ? '${value.toStringAsFixed(0)} $unit' : '-- $unit',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: color),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LinearPercentIndicator(
+              percent: percent.clamp(0.0, 1.0),
+              lineHeight: 12.0,
+              animation: true,
+              animationDuration: 300,
+              progressColor: linearGradient == null ? color : null,
+              linearGradient: linearGradient,
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+              barRadius: const Radius.circular(6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
   Widget _buildOverlaySwitch(){
     return Card(
-      margin: const EdgeInsets.only(top: 20),
       child: SwitchListTile(
         title: const Text('Pop-up de Temperatura'),
         subtitle: const Text('Exibe a temperatura sobre outros apps'),
@@ -181,67 +271,6 @@ class _SensorPanelState extends State<SensorPanel> {
             const SizedBox(width: 8),
             Text(isConnected ? "CONECTADO" : "DESCONECTADO", style: TextStyle(fontWeight: FontWeight.bold, color: isConnected ? colorScheme.primary : colorScheme.error)),
         ]),
-    );
-  }
-
-  Widget _buildRPMGauge(double? rpm) => _buildGauge('RPM', rpm, 8000, [0, 2000, 4000, 8000]);
-  Widget _buildSpeedGauge(double? speed) => _buildGauge('Velocidade (km/h)', speed, 220, [0, 60, 120, 220]);
-
-  Widget _buildGauge(String title, double? value, double max, List<double> ranges) {
-    return SfRadialGauge(
-      title: GaugeTitle(text: title, textStyle: const TextStyle(fontSize: 20.0, fontWeight: FontWeight.bold)),
-      axes: <RadialAxis>[
-        RadialAxis(
-          minimum: 0,
-          maximum: max,
-          ranges: <GaugeRange>[
-            GaugeRange(startValue: ranges[0], endValue: ranges[1], color: Colors.green),
-            GaugeRange(startValue: ranges[1], endValue: ranges[2], color: Colors.orange),
-            GaugeRange(startValue: ranges[2], endValue: ranges[3], color: Colors.red),
-          ],
-          pointers: <GaugePointer>[
-            NeedlePointer(value: value ?? 0, enableAnimation: true, animationDuration: 300, needleStartWidth: 1, needleEndWidth: 5, knobStyle: const KnobStyle(knobRadius: 0.08)),
-          ],
-          annotations: <GaugeAnnotation>[
-            GaugeAnnotation(
-              widget: value != null
-                  ? Text(value.toStringAsFixed(0), style: const TextStyle(fontSize: 25, fontWeight: FontWeight.bold))
-                  : const SizedBox(width: 25, height: 25, child: CircularProgressIndicator(strokeWidth: 3)),
-              angle: 90,
-              positionFactor: 0.5,
-            )
-          ],
-        ),
-      ],
-    );
-  }
-
-   Widget _buildCoolantGauge(double? temp) {
-    return Column(
-      children: [
-        Text(
-          temp != null ? 'Temp. do Motor: ${temp.toStringAsFixed(1)}°C' : 'Lendo temperatura...',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-        ),
-        const SizedBox(height: 8),
-        SfLinearGauge(
-          orientation: LinearGaugeOrientation.horizontal,
-          minimum: -20,
-          maximum: 120,
-          axisLabelStyle: const TextStyle(fontSize: 12),
-          markerPointers: [if (temp != null) LinearShapePointer(value: temp, animationDuration: 200)],
-          barPointers: [
-            if (temp != null)
-              LinearBarPointer(
-                value: temp,
-                animationDuration: 200,
-                shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Colors.blue, Colors.green, Colors.orange, Colors.red],
-                    stops: [0.25, 0.5, 0.75, 1.0]).createShader(bounds),
-              ),
-          ],
-        ),
-      ],
     );
   }
 }
