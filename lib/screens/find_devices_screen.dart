@@ -48,10 +48,12 @@ class _FindDevicesScreenState extends State<FindDevicesScreen> {
     Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
+      Permission.location,
     ].request();
 
     final permissionsGranted = statuses[Permission.bluetoothScan]!.isGranted &&
-                             statuses[Permission.bluetoothConnect]!.isGranted;
+                             statuses[Permission.bluetoothConnect]!.isGranted &&
+                             statuses[Permission.location]!.isGranted;
     if(mounted) {
       setState(() => _permissionsGranted = permissionsGranted);
     }
@@ -153,10 +155,10 @@ class _FindDevicesScreenState extends State<FindDevicesScreen> {
     if (!_permissionsGranted) {
       return _buildInfoView(
         icon: Icons.lock, 
-        title: "Permissão de Bluetooth necessária", 
-        message: "Este aplicativo precisa de permissão para escanear e se conectar a dispositivos Bluetooth. Por favor, conceda a permissão nas configurações do seu celular.",
+        title: "Permissões necessárias", 
+        message: "Este aplicativo precisa de permissão de Bluetooth e Localização para escanear e se conectar a dispositivos. Por favor, conceda as permissões.",
         onPressed: _checkPermissionsAndBluetooth,
-        buttonText: "Tentar Novamente",
+        buttonText: "Conceder Permissões",
       );
     }
 
