@@ -16,7 +16,7 @@ class FindDevicesScreen extends StatefulWidget {
 
 class _FindDevicesScreenState extends State<FindDevicesScreen> {
   bool _isScanning = false;
-  final List<ScanResult> _scanResults = [];
+  List<ScanResult> _scanResults = [];
   StreamSubscription<List<ScanResult>>? _scanSubscription;
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
   
@@ -26,15 +26,11 @@ class _FindDevicesScreenState extends State<FindDevicesScreen> {
   @override
   void initState() {
     super.initState();
-    _checkPermissionsAndBluetooth();
     _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
-      if(mounted) {
-        setState(() => _adapterState = state);
-      }
-      if (state == BluetoothAdapterState.on && _permissionsGranted) {
-        _startScan();
-      }
+      if(mounted) setState(() => _adapterState = state);
+      if (state == BluetoothAdapterState.on) _startScan(); // Inicia o scan se o bluetooth for ligado
     });
+    _checkPermissionsAndBluetooth();
   }
 
   @override
@@ -48,71 +44,79 @@ class _FindDevicesScreenState extends State<FindDevicesScreen> {
     Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.location,
+      Permission.location, // Localização é necessária para o scan BLE
     ].request();
 
-    final permissionsGranted = statuses[Permission.bluetoothScan]!.isGranted &&
-                             statuses[Permission.bluetoothConnect]!.isGranted &&
-                             statuses[Permission.location]!.isGranted;
-    if(mounted) {
-      setState(() => _permissionsGranted = permissionsGranted);
-    }
+    final allGranted = statuses.values.every((status) => status.isGranted);
+    if (mounted) setState(() => _permissionsGranted = allGranted);
 
-    if (permissionsGranted) {
-       final adapterState = await FlutterBluePlus.adapterState.first;
-       if(mounted) {
-         setState(() => _adapterState = adapterState);
-       }
-       if(adapterState == BluetoothAdapterState.on) {
-         _startScan();
-       }
-    } 
+    if (allGranted) {
+       _adapterState = await FlutterBluePlus.adapterState.first;
+       if (_adapterState == BluetoothAdapterState.on) _startScan();
+    }
   }
 
   Future<void> _startScan() async {
-    if (!_permissionsGranted || _adapterState != BluetoothAdapterState.on || _isScanning) {
-      return;
+    if (_isScanning) return; // Se já está escaneando, não faz nada
+
+    if (!_permissionsGranted || _adapterState != BluetoothAdapterState.on) {
+        developer.log("Scan não iniciado: Permissões ou Bluetooth não estão prontos.", name: "FindDevicesScreen");
+        return;
     }
 
     setState(() {
-      _isScanning = true;
-      _scanResults.clear();
+        _isScanning = true;
+        _scanResults = []; // Limpa resultados antigos
     });
 
-    try {
-      _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
-          if (mounted) {
-            setState(() {
-              for (var res in results) {
-                final index = _scanResults.indexWhere((r) => r.device.remoteId == res.device.remoteId);
-                if(index == -1 && res.device.platformName.isNotEmpty) {
-                  _scanResults.add(res);
-                }
-              }
-              _scanResults.sort((a, b) => b.rssi.compareTo(a.rssi)); 
-            });
-          }
-      }, onError: (e) => developer.log("Erro no Scan: $e", name: "FindDevicesScreen"));
+    // Garante que o scan anterior seja parado e a inscrição cancelada
+    await FlutterBluePlus.stopScan();
+    await _scanSubscription?.cancel();
+    _scanSubscription = null;
 
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+    // Começa a escutar os resultados do scan
+    _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
+        if (mounted) {
+            setState(() {
+              // Filtra dispositivos sem nome e atualiza a lista
+                _scanResults = results.where((r) => r.device.platformName.isNotEmpty).toList();
+                 // Ordena por força do sinal (RSSI)
+                _scanResults.sort((a, b) => b.rssi.compareTo(a.rssi));
+            });
+        }
+    }, onError: (e) => developer.log("Erro no Stream de Scan: $e", name: "FindDevicesScreen"));
+
+    // Inicia o scan com um timeout
+    try {
+        await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+    } catch (e) {
+        developer.log("Erro ao iniciar o scan: $e", name: "FindDevicesScreen");
+        _stopScan(); // Para tudo em caso de erro
     } finally {
-       if(mounted) {
-         setState(() => _isScanning = false);
-       }
+        // O `finally` pode não ser o ideal aqui se `stopScan` for chamado manualmente
+        // Apenas garantimos que o estado de `_isScanning` seja falso ao final
+        if (mounted) {
+            // O timeout vai parar o scan, mas podemos deixar o estado de scanning
+            // ser controlado pelo stopScan para maior clareza.
+        }
     }
   }
 
-  void _stopScan() {
-    FlutterBluePlus.stopScan();
-    _scanSubscription?.cancel();
-    if(mounted) {
-      setState(() => _isScanning = false);
+  Future<void> _stopScan() async {
+    await FlutterBluePlus.stopScan();
+    await _scanSubscription?.cancel();
+    _scanSubscription = null;
+    if (mounted && _isScanning) {
+        setState(() => _isScanning = false);
     }
   }
 
   Future<void> _connectToDevice(BluetoothDevice device) async {
-    _stopScan();
-    await context.read<OBD2Provider>().connect(device);
+    // Para o scan antes de tentar conectar para economizar bateria e evitar interferência
+    await _stopScan(); 
+    if (mounted) {
+        await context.read<OBD2Provider>().connect(device);
+    }
   }
 
   @override
@@ -142,11 +146,12 @@ class _FindDevicesScreenState extends State<FindDevicesScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _adapterState != BluetoothAdapterState.on || !_permissionsGranted || isConnecting
+        onPressed: (_adapterState != BluetoothAdapterState.on || !_permissionsGranted || isConnecting)
           ? null 
-          : (_isScanning ? _stopScan : _startScan),
-        backgroundColor: _adapterState != BluetoothAdapterState.on || !_permissionsGranted || isConnecting ? Colors.grey : null,
-        child: Icon(_isScanning ? Icons.stop : Icons.search),
+          : (_isScanning ? _stopScan : _startScan), // Alterna entre iniciar e parar
+        backgroundColor: (_adapterState != BluetoothAdapterState.on || !_permissionsGranted || isConnecting) ? Colors.grey : Theme.of(context).colorScheme.secondary,
+        tooltip: _isScanning ? 'Parar Scan' : 'Procurar Dispositivos',
+        child: _isScanning ? const Icon(Icons.stop) : const Icon(Icons.search),
       ),
     );
   }
@@ -181,27 +186,20 @@ class _FindDevicesScreenState extends State<FindDevicesScreen> {
     }
 
     if (!_isScanning && _scanResults.isEmpty) {
-       return Center(
-         child: Padding(
-           padding: const EdgeInsets.all(20.0),
-           child: Column(
-             mainAxisAlignment: MainAxisAlignment.center,
-             children: [ 
-                const Icon(Icons.search_off, size: 80, color: Colors.grey), 
-                const SizedBox(height: 16),
-                const Text("Nenhum dispositivo encontrado.", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                const Text("Verifique se o seu scanner OBD2 está ligado e ao alcance. Toque no botão de busca para tentar novamente.", textAlign: TextAlign.center),
-             ]
-           ),
-         ),
-       );
+       return _buildInfoView(
+        icon: Icons.search_off,
+        title: "Nenhum dispositivo encontrado",
+        message: "Verifique se o seu scanner OBD2 está ligado e ao alcance. Toque no botão de busca para tentar novamente.",
+        onPressed: _startScan,
+        buttonText: "Tentar Novamente",
+      );
     }
 
     return ListView.builder(
       itemCount: _scanResults.length,
       itemBuilder: (context, index) {
         final result = _scanResults[index];
+        // UUID Padrão para Serial Port Profile (SPP), comum em adaptadores ELM327
         final isObd = result.advertisementData.serviceUuids.any((uuid) => uuid.toString().toUpperCase().startsWith("00001101"));
         final colorScheme = Theme.of(context).colorScheme;
 
@@ -212,7 +210,10 @@ class _FindDevicesScreenState extends State<FindDevicesScreen> {
           child: ListTile(
             title: Text(result.device.platformName, style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text(result.device.remoteId.toString()),
-            leading: const Icon(Icons.bluetooth, color: Colors.blueAccent),
+            leading: CircleAvatar(
+              backgroundColor: isObd ? colorScheme.primary : Colors.grey.shade300,
+              child: Icon(Icons.bluetooth, color: isObd ? colorScheme.onPrimary : Colors.grey.shade700),
+            ),
             trailing: const Icon(Icons.arrow_forward_ios),
             onTap: () => _connectToDevice(result.device),
           ),
